@@ -1,0 +1,410 @@
+---
+title: 'LBB Unsupervised Learning: Country Data'
+author: "Muh Amri Sidiq"
+date: "2023-07-24"
+output:  
+  html_document:
+    theme: "journal"
+    highlight: espresso
+    toc: true
+    toc_float:
+      collapsed: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+# clear-up the environment
+rm(list = ls())
+
+# chunk options
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center",
+  comment = "#>"
+)
+
+options(scipen = 999)
+```
+
+
+# Introduction
+
+Kategori negara berdasarkan kelas sosial, ekonomi dan kesehatan adalah yang menentukan pembangunan suatu negara secara keseluruhan. HELP international adalah LSM yang berkomitmen memerangi kemisikan, menyediakan fasilitas dan bantuan di negara terbelakang setelah terjadi bencana alam. Lembaga itu berhasil mengumpulkan dana sebesar $10 juta US dolar. CEO LSM ingin dananya di gunakan secara strategis dan efektif.  CEO akan memutuskan negara mana yang akan menerima bantuan tersebut. Tugas seorang data scientist adalah mengkategorikan negara berdasarkan faktor sosial, ekonomi dan kesehatan secara keseluruhan. Kemudian memberi saran negara mana yang mendapatkan bantuan tersebut. Beberapa library yang kita butuhkan antara lain:
+
+```{r}
+library(dplyr)
+library(tidyverse)
+library(factoextra)
+library(FactoMineR)
+library(plotly)
+```
+
+# Data Preprocesing
+## Import Data
+
+```{r}
+country <- read.csv("Country-data-f.csv")
+```
+
+## Data Inspection
+
+Kita gunakan head untuk melihat data teratas
+
+```{r}
+head(country)
+```
+
+Kita pisahkan dulu datanya sesuai dengan namanya
+
+```{r}
+country_separate <- separate(country, col = "country.child_mort.exports.health.imports.income.inflation.life_expec.total_fer.gdpp", into = c("country", "child_mort", "exports", "health", "imports", "income", "inflation", "life_expec", "total_fer", "gdpp"), sep = ";" )
+country_separate
+```
+
+Merubah Type data
+
+```{r}
+country_separate$country <- as.factor(country_separate$country)
+```
+
+
+```{r}
+# meng-assign nilai dari kolom country menjadi rownames
+rownames(country_separate) <- country_separate$country
+
+country_clean <- country_separate %>% 
+  mutate_at(vars(child_mort,exports,health,imports,income,inflation,life_expec,total_fer,gdpp), as.numeric) %>% 
+  select(-country)
+
+glimpse(country_clean)
+```
+
+Dari fungsi glimps di atas bisa kita lihat, data memiliki 167 row dan 10 coloumns. Berikut penjelasan mengenai variable nya:
+
+ - country        : Name of the country
+ - child_mort     : Death of children under 5 years of age per 1000 live births
+ - exports        : Exports of goods and services per capita. Given as %age of the GDP per capita
+ - health         : Total health spending per capita. Given as %age of GDP per capita
+ - imports        : Imports of goods and services per capita. Given as %age of the GDP per capita
+ - income         : Net income per person
+ - inflation      : The measurement of the annual growth rate of the Total GDP
+ - life_expec     : The average number of years a new born child would live if the current mortality patterns are to remain the same
+ - total_fer      : The number of children that would be born to each woman if the current age-fertility rates remain the same
+ - gdpp           : The GDP per capita. Calculated as the Total GDP divided by the total population.
+
+
+Check Missing values
+
+```{r}
+anyNA(country_clean)
+```
+
+
+# Exploratory Data Analysis
+
+Dengan menggunakan summary kita akan mempunyai beberapa informasi sebagai berikut
+
+```{r}
+summary(country_clean)
+```
+
+Dari data di atas antar dimensi mempunyai skala yang berbeda.
+
+# Data Preprocessing
+
+Karena data kita mempunyai skala berbeda, maka kita akan mengskalakan terlebih dahulu
+
+```{r}
+country_scale <- scale(country_clean)
+summary(country_scale)
+```
+
+# Clustering
+
+## K Optimum
+
+Dengan library factoextra kita akan menggunakan elbow method untuk menentukannya dengan catatan bahwa dari segi business tidak menentukan berapa K optimimunya
+
+```{r}
+fviz_nbclust(
+  x = country_scale, # data
+  FUNcluster = kmeans, 
+  method = "wss" # method
+)
+```
+
+Dari plot di atas kita bisa melihat K mulai melandai di nomer 6, sehingga bisa kita simpulkan K optimum adalah 6
+
+Dari data country_scale kita akan membuat clustering dengan K optimum 6
+
+```{r}
+country_cluster <- kmeans(x = country_scale,
+                       centers = 6)
+
+```
+
+## Banyaknya observasi pada tiap cluster
+
+```{r}
+country_cluster$size
+```
+
+Dari data di atas bisa kita lihat bahwa ada 1 cluster yang hanya di isi 3 negara yaitu cluster 6
+
+## Letak pusat cluster/centroid
+
+```{r}
+country_cluster$centers
+```
+
+Untuk melihat negara mana saja yang masuk tiap-tiap cluster
+
+```{r}
+country_cluster$cluster
+```
+
+
+## Interpretation Clustring
+
+Membuat kolom baru yang berisikan informasi label dari cluster yang terbentuk menggunakan k optimum
+
+```{r}
+country_clean$cluster <- as.factor(country_cluster$cluster)
+
+country_clean %>% head()
+```
+
+## Profiling Cluster
+
+Melakukan grouping berdasarkan cluster yang terbentuk, untuk mengetahui karakteristik dari masing-masing cluster
+
+```{r}
+country_centroid <- country_clean %>% 
+  group_by(cluster) %>% 
+  summarise_all(mean)
+country_centroid
+```
+
+Kita akan mengelompokkan mana yang paling rendah dan mana yang paling tinggi tiap dimensinya
+
+```{r}
+country_centroid %>% 
+  pivot_longer(-cluster) %>% 
+  group_by(name) %>% 
+  summarize(
+    kelompok_min = which.min(value),
+    kelompok_max = which.max(value))
+```
+
+Penjelasan dari plot di atas adalah sebagai berikut:
+
+ - Cluster 1 termmasuk ke kelompok minimum di variabel health dan imports
+ - Cluster 2 tidak termasuk di semua kelompok baik minimum maupun maximum di semua variabel
+ - Cluster 3 termasuk ke kelompok minimum di variabel exports dan income
+ - Cluster 4 termasuk ke kelompok minimum dengan variabel gdpp dan life_expec, serta termauk ke kelompok maximum dengan variabel child_mort, inflation dan total_fer
+ - Cluster 5 Termasuk ke kelompok maximum dengan variabel health
+ - Cluster 6 termasuk ke kelompok minimum dengan variabel child_mort, inflation dan total_fer, serta termasuk ke kelompok maximum dengan variabel exports, gdpp, imports, income dan life_expec
+
+## Goodness of Fit Clustering
+
+Kebaikan hasil clustering dapat dilihat dari 3 nila
+
+### Within Sum of Squares
+
+jumlah jarak kuadrat dari tiap observasi ke centroid tiap cluster. Dari kasus kita nilai WSS bisa kita cari di vawah ini: 
+
+```{r}
+country_cluster$withinss
+```
+
+### Between Sum of Squares
+
+jumlah jarak kuadrat terbobot dari tiap centroid ke rata-rata global
+
+```{r}
+country_cluster$betweenss
+```
+
+### Total Sum of Squares
+
+jumlah jarak kuadrat dari tiap observasi ke rata-rata global
+
+```{r}
+country_cluster$totss
+```
+
+Sedangkan rasio antara BSS dengan TSS adlah sebagai berikut
+
+```{r}
+country_cluster$betweenss/country_cluster$totss
+```
+
+Rasionya cukup baik karena mendekati 1
+
+## Visualisasi Clustering
+
+kita memvisualisasikannya pada plot 2 dimens, dengan objectnya adalah country_cluster dan datanya adalah country_clean
+
+```{r}
+# visualisasi 2 dimensi
+fviz_cluster(object = country_cluster,
+             data = country_clean %>% select(-cluster))
+```
+
+# PCA
+
+membuat sumbu baru yang dapat menangkap informasi (variance) sebesar mungkin dari variabel-variabel awal. Sumbu baru ini adalah yang dinamakan sebagai Principal Component (PC)
+
+kita ingin buat sebuah visualisasi yang mempermudah cluster profiling, dimana tampilan individual dan variables factor map menjadi satu. Visualisasi dapat dibuat menggunakan fungsi fviz_pca_biplot() dari package factoextra
+
+## Model PCA
+
+```{r}
+# buat model PCA
+country_pca <- PCA(X = country_clean, # data untuk di PCA
+               scale.unit = T,
+               quali.sup = 10, # quali.sup -> indeks dari kolom kategori
+               graph = F)
+summary(country_pca)
+```
+
+Dari data di atas kita bisa explore lagi dengan melihat proporsi dimensinya dengan plot di bawah ini:
+
+```{r}
+fviz_eig(country_pca, ncp = 9, addlabels = T, main = "Variance by each dimensions")
+```
+
+Dimensi 1 dan 2 mempunyai variansi sekitar 63%, dari dimensi tersebut kita akan membuat visualisasi
+
+## Visualisasi PCA
+
+### Individual Factor Map
+
+Tujuannya untuk menampilkan sebaran data
+
+```{r}
+plot.PCA(
+  x = country_pca,           
+  choix = "ind",
+  select = "contrib 5"
+)
+```
+
+Dengan visual plot di atas negara singapore, malta, luxemburg, haiti dan nigeria menjadi outlier
+
+### Variable Factor Map
+
+```{r}
+plot.PCA(x = country_pca,
+         choix = "var")
+```
+
+Insight yang bisa kita ambil dari plot di atas adalah:
+
+ - PC1/ Dim 1 merangkum variabel : life_expec, child_mort, total_fer, income dan  gdpp
+ - PC1/ Dim 2merangkum variabel : imports dan exports
+ - Pasangan variabel yang saling berkorelasi tinggi positif: imports-exports, income-gdpp, gdpp-life_expec
+ - Pasangan variabel yang saling berkorelasi tinggi negatif: child_mort-total_fer
+
+## Dimension Description
+
+Kita akan melihat kontribusi variabel untuk dimensi 1
+
+```{r}
+fviz_contrib(X = country_pca,
+             choice = "var",
+             axes = 1)
+```
+
+
+Dari plot di atas bisa kita ambil kesimpulan variabel life_expec, child_mort, total_fer, income dan gdpp yang mempunyai kontribusi di dimensi 1
+
+Kita akan melihat kontribusi variabel untuk dimensi 2
+
+```{r}
+fviz_contrib(X = country_pca,
+             choice = "var",
+             axes = 2)
+```
+
+Dari plot di atas bisa kita ambil kesimpulan variabel imports dan exports yang mempunyai kontribusi di dimensi 2
+
+### Visualisasi PCA, Biplot & Cluster
+
+```{r}
+# visualisasi biplot + cluster
+fviz_pca_biplot(X = country_pca,
+                habillage = "cluster",
+                geom.ind = "point",
+                addEllipses = TRUE)
+```
+
+Dengan menggunakan PCA - Biplot bisa kita menarik kesimpulan:
+ - child_mort berkolerasi kuat positif dengan total_fer
+ - child_mort, total_fer dan inflation, berkolerasi kuat negatif dengan health, life_expec, gdpp dan income
+
+# Case: Country Recomender
+
+Negara mana yang akan mendapatkan bantuan dari HELP Internationa?
+
+Dari case di atas maka kita akan mengkelompokkan data dengan filtrasi kelas sosial, ekonomi dan kesehatan yang rendah. Di bawah iniadalah negara-negara yang menjadi nominasi penerima bantuan dari HELP International.
+
+- Dengan melihat korelasi di plot PCA - Biplot sebagai berikut
+
+```{r}
+# variabel child_mort
+country_clean %>% 
+  filter(cluster == "4") %>% arrange(-child_mort) %>% head()
+```
+
+```{r}
+# variabel total_fer
+country_clean %>%
+  filter(cluster == "4") %>% arrange(-total_fer)%>% head() 
+```
+
+```{r}
+# variabel inflation
+country_clean %>%
+  filter(cluster == "4")%>% arrange(-inflation) %>% head()
+```
+
+Dari variabel child_mort, total_fer dan inflation negara  rekomendasi kita adalah di cluster 4
+
+Kita akan melihat mencari negara dengan korelasi kuat negatif terhadap child_mort, total_fer dan inflation yaitu health, life_expec, gdpp dan income
+
+```{r}
+# variabel health
+country_clean %>% 
+  filter(cluster == "1") %>% arrange(health) %>% head()
+```
+
+```{r}
+# variabel life_expec
+country_clean %>% 
+  filter(cluster == "4") %>% arrange(life_expec) %>% head()
+```
+
+```{r}
+# variabel gdpp
+country_clean %>% 
+  filter(cluster == "4") %>% arrange(gdpp) %>% head()
+```
+
+```{r}
+# variabel life_expec
+country_clean %>% 
+  filter(cluster == "4") %>% arrange(income) %>% head()
+```
+
+Dari variabel life_expec, gdpp dan income rekomendasi kita adalah di cluster 4. Dari variabel health rekomendasi kita adalah di cluster 1. 
+
+# Conclusion
+
+Dari plot PCA-biplot dapat kita simpulkan variabel child_mort berkolerasi kuat positif dengan total_fer, yang artinya jumlah kematian anak di bawah 5 tahun per 1000 kelahiran berkolerasi kuat dengan jumlah anak yang di lahirkan. Variabel child_mort, total_fer dan inflation, berkolerasi kuat negatif dengan health, life_expec, gdpp dan income, yang artinya jika kematian anak di bawah 5 tahun, jumlah kelahiran anak dan infalsi meningkat maka, kesehatan, jumlah kelahiran anak hidup, gdpp dan penghasilan tiap orang/ income akan menurun. Dari rekomendasi di atas maka di cluster no 4 menjadi prioritas yang mendapat bantuan dari lembaga HELP International. Sedangkan untuk cluster 1 dengan nilai health kita mempunyai asumsi bahwa mungkin negara tersebut menggunakan subsidi, sehingga total belanja kesehatan per kapitanya rendah, oleh karena itu cluster 1 tidak di rekomendasikan.
+
+# Reference
+
+https://www.kaggle.com/datasets/rohan0301/unsupervised-learning-on-country-data
+
